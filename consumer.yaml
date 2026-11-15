@@ -1,0 +1,61 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: canary-consumer
+  namespace: __NAMESPACE__
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 120
+  template:
+    spec:
+      serviceAccountName: canary-reader
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+      containers:
+        - name: consumer
+          image: __SERVER_IMAGE__
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              set -eu
+              # No shell tracing, token helper, JWT arguments or credential output.
+              BAO_TOKEN="$(bao write -field=token auth/kubernetes/login \
+                role=canary-reader jwt=@/var/run/secrets/kubernetes.io/serviceaccount/token)"
+              export BAO_TOKEN
+              trap 'bao token revoke -self >/dev/null; unset BAO_TOKEN' EXIT
+              value="$(bao kv get -mount=kv -field=value canary)"
+              test "$value" = "openbao-kms-canary-v1"
+              unset value
+              printf '%s\n' 'Canary read authorized and value matched.'
+          env:
+            - name: BAO_ADDR
+              value: https://__NAMESPACE__.__NAMESPACE__.svc:8200
+            - name: BAO_CACERT
+              value: /ca/ca.crt
+            - name: BAO_CLIENT_TIMEOUT
+              value: 15s
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: ca
+              mountPath: /ca
+              readOnly: true
+      volumes:
+        - name: ca
+          configMap:
+            name: openbao-ca

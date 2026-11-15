@@ -1,0 +1,28 @@
+server:
+  updateStrategyType: RollingUpdate
+  extraEnvironmentVars:
+    AWS_CONTAINER_CREDENTIALS_FULL_URI: http://169.254.170.23/v1/credentials
+    AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE: /var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token
+  volumes:
+    - name: tls
+      secret:
+        secretName: openbao-tls
+    - name: plugins
+      emptyDir: {}
+    - name: eks-pod-identity-token
+      projected:
+        defaultMode: 420
+        sources:
+          - serviceAccountToken:
+              audience: pods.eks.amazonaws.com
+              expirationSeconds: 86400
+              path: eks-pod-identity-token
+  volumeMounts:
+    - name: tls
+      mountPath: /openbao/tls
+      readOnly: true
+    - name: plugins
+      mountPath: /openbao/plugins
+    - name: eks-pod-identity-token
+      mountPath: /var/run/secrets/pods.eks.amazonaws.com/serviceaccount
+      readOnly: true

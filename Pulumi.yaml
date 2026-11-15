@@ -1,0 +1,6 @@
+name: aws-openbao-eks
+description: KMS auto-unseal and a scoped Kubernetes secret reader on existing EKS.
+runtime:
+  name: python
+  options:
+    virtualenv: .venv

@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "reviewed_at": "2026-11-15T18:08:07.881Z",
+  "node_platform": "linux/amd64",
+  "runner": "CPython 3.12 Linux glibc ARM64/AMD64; macOS ARM64",
+  "pulumi": {
+    "cli": "3.273.0",
+    "sdk": "3.273.0",
+    "aws": "7.52.1",
+    "kubernetes": "4.34.2",
+    "lock": "requirements.lock"
+  },
+  "server": {
+    "version": "2.7.2",
+    "image": "quay.io/openbao/openbao:2.7.2@sha256:a78eb12a9fc7a3ebb4bec1724e2bdd6a28e33394820641d061166919a3f1866b",
+    "index_digest": "sha256:5046911075e137e154ce49ab051502f4ec7cf367d484ae4a4dce665d9b90561f",
+    "released_at": "2026-10-26T20:24:37Z",
+    "license": "MPL-2.0"
+  },
+  "chart": {
+    "version": "0.30.7",
+    "path": "chart/openbao-0.30.7.tgz",
+    "url": "https://github.com/openbao/openbao-helm/releases/download/openbao-0.30.7/openbao-0.30.7.tgz",
+    "sha256": "fa4e6f3c1bbe936dc7ba079f1303ea56810af2f8600f046d8d5809860a4f980f",
+    "released_at": "2026-11-06T06:36:48Z",
+    "license": "MPL-2.0"
+  },
+  "seal_plugin": {
+    "version": "0.1.1",
+    "image": "ghcr.io/openbao/openbao-plugin-kms-aws:v0.1.1@sha256:e0cff49b4670083d1ba5f3cd105b6f7967040869b6c14be2f6d9ca4d7ed220cd",
+    "index_digest": "sha256:24a0a1294385a34224848d0d6ff2c9287f9c9b0ded1de953cc539dc76ced160c",
+    "released_at": "2026-10-26T21:44:41Z",
+    "license": "MPL-2.0"
+  },
+  "admin_cli": {
+    "version": "2.7.2",
+    "artifact": "https://github.com/openbao/openbao/releases/download/v2.7.2/openbao_2.7.2_linux_amd64.tar.gz",
+    "sha256": "582b1f3c2fdc5afd443b2d57a225ef654de75adea609fdb66731fd582a9cbc96",
+    "acquisition_status": "not_acquired; optional separate guest CLI, bao is already in the server image"
+  },
+  "authored_license": "Pending owner decision"
+}
