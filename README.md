@@ -66,7 +66,7 @@ git clone https://github.com/pulumi-labs/pulumi-example-stack-aws-openbao-eks.gi
 cd pulumi-example-stack-aws-openbao-eks
 ```
 
-Public release and authored-code licensing are pending.
+The authored example code uses the MIT License; see `LICENSE`.
 
 Choose a lowercase resource prefix of at most 30 characters, starting with a
 letter. It becomes both the Kubernetes namespace and Helm release name.
@@ -267,10 +267,6 @@ as part of this application's removal.
 - [Truvity secrets](https://github.com/truvity/secrets), whose maintained
   upstream chart/Pod Identity/KMS patterns overlap this narrower integration.
 
-Upstream license texts are preserved in `OPENBAO-LICENSE`, `HELM-LICENSE` and
-`PLUGIN-LICENSE`, and the unmodified chart archive includes its notices.
-These MPL-2.0 notices do not license this example's authored code.
-Authored-code licensing, maintenance owner and a private security-reporting
-contact must be decided before public release. Until then, report maintenance
-questions through the private repository owner; do not post credentials or
-state in an issue.
+This example's authored code is licensed under the [MIT License](LICENSE) and
+is provided as-is, without warranty or a support commitment. Third-party
+components retain their own licenses and notices.

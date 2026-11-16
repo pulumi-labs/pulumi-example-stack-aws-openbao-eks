@@ -20,4 +20,4 @@
 - One replica is not HA. Do not add PKI, backups, custom images, retry sidecars,
   providers or an infrastructure framework as incidental prerequisites.
 - Keep the polished runtime byte-identical after any change. Tests/research
-  evidence belong outside this runtime. Publication/licensing need owner decisions.
+  evidence belong outside this runtime. Preserve the MIT License and upstream notices.
