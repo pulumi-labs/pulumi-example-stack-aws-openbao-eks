@@ -46,21 +46,6 @@ OpenBao sets itself up on first start with its native one-time initialization.
 There's no bootstrap Job, no root token Secret, no custom image and no extra
 Terraform provider.
 
-## Validation status
-
-Tested on November 15, 2026 in an approved disposable EKS environment:
-
-- The authorized canary read passed.
-- An unbound identity and an ungranted path each returned HTTP 403.
-- Replacing the server pod showed KMS auto-unseal working, followed by a
-  successful read of the persisted canary.
-- After destruction, the namespace, Raft volume, IAM role and Pod Identity
-  association were independently confirmed removed. The KMS key is scheduled
-  for deletion on December 15, 2026.
-
-HA, backup, restore and production readiness have **not** been tested. One
-replica is not a highly available setup.
-
 ## Prerequisites
 
 ### Cluster
@@ -285,8 +270,8 @@ protected storage outside the repository, then hand the encrypted shares to
 separate custodians.
 
 The endpoint returns shares immediately when none exist, so never call it from
-a logged shell or capture its output as evidence. No recovery or generate-root
-drill has been validated here.
+a logged shell or capture its output in shared logs. Recovery custody and
+generate-root drills are outside this example's setup.
 
 ## Updating
 
