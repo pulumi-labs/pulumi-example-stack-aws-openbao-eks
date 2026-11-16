@@ -1,80 +1,140 @@
 # OpenBao on Amazon EKS with AWS KMS and Kubernetes secret readers
 
-Deploy a private OpenBao server with Python Pulumi, AWS KMS auto-unseal,
-persistent Raft storage and a Kubernetes workload that reads one canary secret
-using its service account. The workload stores no OpenBao token.
+This example gives your Kubernetes applications a private secrets server that
+unlocks itself after a restart and lets each workload read only the secrets it
+was granted. Workloads log in with their Kubernetes service account, so no
+long-lived OpenBao token needs to be stored in a Kubernetes Secret. The consumer
+obtains a short-lived token at runtime and revokes it after use.
 
-Validation status, November 15, 2026: deployed in an approved disposable EKS
-environment. The authorized canary read passed; an unbound identity and an
-ungranted path each returned HTTP 403. Replacing the server pod demonstrated
-KMS auto-unseal and a successful read of the persisted canary. The namespace,
-Raft volume, IAM role and Pod Identity association were independently confirmed
-removed after destruction. The KMS key is scheduled for deletion on December 15,
-2026. HA, backup, restore and production readiness remain untested.
+You deploy it with Python Pulumi into an EKS cluster you already run. When it
+finishes, a sample Job proves the setup works by reading one test secret
+(the "canary") and checking its value.
 
-The stack creates one KMS key, one IAM role/inline policy and EKS Pod Identity
-association, a dedicated namespace, TLS Secret/public CA, three service
-accounts, the official OpenBao Helm release and a sample consumer Job.
-It uses OpenBao's native one-time initialization, with no bootstrap Job,
-root token Secret, custom image or extra Terraform provider.
+## Key terms
 
-## Requirements
+If some of these tools are new to you, here's what each one does in this example:
 
-Use an existing EKS cluster in `us-east-2`, Kubernetes 1.30 or later, Linux
-AMD64 nodes, working EKS Pod Identity agent and EBS CSI. Supply an existing
-encrypted StorageClass with `ReadWriteOnce` and understand its reclaim policy.
-An existing cluster and its node charges are outside this application's stack.
+- **OpenBao**: an open source secrets manager (a community fork of HashiCorp
+  Vault). Applications ask it for secrets over HTTPS.
+- **EKS** (Amazon Elastic Kubernetes Service): AWS's managed Kubernetes. You
+  bring an existing cluster; this stack doesn't create one.
+- **KMS** (AWS Key Management Service): stores the encryption key that protects
+  OpenBao's data. The key never leaves AWS.
+- **Auto-unseal**: OpenBao starts "sealed" and can't read its own data until it
+  is unlocked. With auto-unseal, OpenBao asks KMS to unlock it, so nobody has to
+  type in unseal keys after every restart.
+- **Raft**: OpenBao's built-in storage engine. Here it writes to one persistent
+  disk (an EBS volume), so data survives pod restarts.
+- **Pod Identity** (EKS Pod Identity): gives a specific Kubernetes service
+  account short-lived AWS credentials. Only the OpenBao server gets an AWS role,
+  and that role can only use its one KMS key.
+- **Helm**: the Kubernetes package manager. The stack installs the official
+  OpenBao Helm chart, which is vendored in this repository.
+- **TLS**: all traffic to OpenBao is encrypted, and clients verify the server's
+  certificate against a CA you provide.
 
-The deployment runner needs authenticated AWS access, private Kubernetes API
-connectivity, and Kubernetes rights to create a namespace and the chart's
-TokenReview ClusterRoleBinding. The server's Pod Identity role has only
-Encrypt/Decrypt/DescribeKey on its one KMS key. Keep EC2 node credentials
-inaccessible to application pods. The reader and operator service accounts
-have no AWS association. No Dify, Tailscale, firewall agent or operator is
-required.
+## What the stack creates
+
+- One KMS key, plus one IAM role with an inline policy and an EKS Pod Identity
+  association for the OpenBao server.
+- A dedicated Kubernetes namespace, a TLS Secret and public CA, and three
+  service accounts (server, `canary-reader` and `openbao-operator`).
+- The official OpenBao Helm release, running one server.
+- A sample consumer Job that reads the canary secret.
+
+OpenBao sets itself up on first start with its native one-time initialization.
+There's no bootstrap Job, no root token Secret, no custom image and no extra
+Terraform provider.
+
+## Validation status
+
+Tested on November 15, 2026 in an approved disposable EKS environment:
+
+- The authorized canary read passed.
+- An unbound identity and an ungranted path each returned HTTP 403.
+- Replacing the server pod showed KMS auto-unseal working, followed by a
+  successful read of the persisted canary.
+- After destruction, the namespace, Raft volume, IAM role and Pod Identity
+  association were independently confirmed removed. The KMS key is scheduled
+  for deletion on December 15, 2026.
+
+HA, backup, restore and production readiness have **not** been tested. One
+replica is not a highly available setup.
+
+## Prerequisites
+
+### Cluster
+
+- An existing EKS cluster in `us-east-2`, running Kubernetes 1.30 or later.
+- Linux AMD64 nodes.
+- A working EKS Pod Identity agent and EBS CSI driver.
+- An existing encrypted StorageClass with `ReadWriteOnce` access. Check its
+  reclaim policy, because it decides what happens to the disk on removal.
+
+The cluster and its node charges sit outside this stack.
+
+### Permissions
+
+- The machine that runs Pulumi needs authenticated AWS access and private
+  network access to the Kubernetes API.
+- Its Kubernetes identity must be able to create a namespace and the chart's
+  TokenReview ClusterRoleBinding.
+- Keep EC2 node credentials out of reach of application pods. The server's
+  Pod Identity role only has Encrypt, Decrypt and DescribeKey on its own KMS
+  key. The reader and operator service accounts have no AWS access at all.
+
+You don't need Dify, Tailscale, a firewall agent or a Kubernetes operator.
 
 The server declares the standard Pod Identity token projection and SDK
-environment variables explicitly, so a new association does not depend on
+environment variables itself, so a new association doesn't depend on
 admission-webhook cache propagation. Kubernetes rotates the projected token.
 
-Nodes need the official Quay image. The server needs ordinary HTTPS to
-`ghcr.io` and `pkg-containers.githubusercontent.com` to obtain its pinned
-plugin, AWS KMS in Ohio, the Kubernetes API and its local Pod Identity agent.
-Do not add private endpoints or a proxy unless your platform requires them.
-No application public inbound service is created.
+### Network
 
-The supported deployment runner is CPython 3.12 on Linux glibc ARM64/AMD64
-(or macOS ARM64 for independently authorized environments), Pulumi CLI/SDK
-3.273.0, AWS provider 7.52.1 and Kubernetes provider 4.34.2.
-The wheel lock reuses the reviewed closure and adds verified Linux AMD64
-grpcio/PyYAML hashes. Provider/tool binaries and downloaded wheels must be
-reviewed and scanned before execution in your approved environment.
-Use existing reviewed `uv`, `kubectl` and OpenBao CLI 2.7.2. Do not run this
-workload or provider programs on a workstation subject to a source-only policy.
+- Nodes pull the official OpenBao image from Quay.
+- The server needs ordinary HTTPS to `ghcr.io` and
+  `pkg-containers.githubusercontent.com` to fetch its pinned KMS plugin, plus
+  access to AWS KMS in Ohio, the Kubernetes API and its local Pod Identity agent.
+- You don't need private endpoints or a proxy unless your platform requires them.
+- The stack creates no public inbound service.
+
+### Tools and versions
+
+- CPython 3.12 on Linux glibc ARM64 or AMD64 (or macOS ARM64 in an
+  independently authorized environment).
+- Pulumi CLI and SDK 3.273.0, AWS provider 7.52.1, Kubernetes provider 4.34.2.
+- `uv`, `kubectl` and the OpenBao CLI 2.7.2.
+- `openssl`, if you generate the evaluation certificate below.
+
+The wheel lock reuses the reviewed dependency set and adds verified Linux AMD64
+grpcio and PyYAML hashes. Review and scan provider and tool binaries and the
+downloaded wheels before running them in your approved environment. Don't run
+the workload or provider programs on a workstation that only allows source
+review.
 
 Chart 0.30.7, server 2.7.2 and AWS KMS plugin 0.1.1 are pinned in `pins.json`.
-The exact official chart archive is vendored. The server downloads the official
-plugin by its AMD64 OCI manifest digest into a mounted empty directory before
-unsealing; no mutable image tag or binary-download script is used.
+The official chart archive is vendored. Before unsealing, the server downloads
+the official plugin by its AMD64 OCI manifest digest into a mounted empty
+directory. No mutable image tag or download script is used.
 
-## Configure and deploy
+## Setup
 
-Authorized collaborators can clone the private repository:
+### 1. Get the code
 
 ```sh
 git clone https://github.com/pulumi-labs/pulumi-example-stack-aws-openbao-eks.git
 cd pulumi-example-stack-aws-openbao-eks
 ```
 
-The authored example code uses the MIT License; see `LICENSE`.
+### 2. Install dependencies and set basic configuration
 
-Choose a lowercase resource prefix of at most 30 characters, starting with a
-letter. It becomes both the Kubernetes namespace and Helm release name.
-If omitted, it defaults to `<Pulumi project>-<Pulumi stack>`.
-Each namespace/release must be new and owned by this stack.
+Run these commands in your approved deployment environment, after the artifact
+and execution checks your organization requires.
 
-The commands below run in an approved deployment environment after the
-artifact and execution checks required by your organization:
+Pick a resource prefix: lowercase, at most 30 characters, starting with a
+letter. It becomes both the Kubernetes namespace and the Helm release name, so
+it must be new and owned only by this stack. If you leave it out, it defaults to
+`<Pulumi project>-<Pulumi stack>`.
 
 ```sh
 uv venv --python 3.12 .venv
@@ -86,20 +146,28 @@ pulumi config set storageClassName "$ENCRYPTED_STORAGE_CLASS"
 pulumi config set --secret kubeconfig < "$KUBECONFIG_FILE"
 ```
 
-AWS resources inherit provider default tags `pulumi-project` and
+AWS resources get the provider default tags `pulumi-project` and
 `pulumi-stack`. The IAM role and inline policy are named
-`<resourcePrefix>-unseal`. If your deployment identity requires an existing
-permissions boundary, set its ARN. It is optional in product defaults:
+`<resourcePrefix>-unseal`.
+
+### 3. (Optional) Set a permissions boundary
+
+Only needed if your deployment identity must attach an existing permissions
+boundary to new roles:
 
 ```sh
 pulumi config set permissionsBoundaryArn "$BOUNDARY_ARN"
 ```
 
-Supply a server certificate chain, its matching private key and the trusted
-CA. The certificate must cover `<prefix>.<prefix>.svc`; including `localhost`
-and `127.0.0.1` also permits direct local diagnostic commands. Keep the key
-outside this repository. For an isolated evaluation, create a short-lived
-self-signed leaf in secure storage in the approved environment:
+### 4. Provide TLS certificates
+
+OpenBao needs a server certificate chain, its matching private key and the
+trusted CA. The certificate must cover `<prefix>.<prefix>.svc`. Adding
+`localhost` and `127.0.0.1` also lets you run local diagnostic commands
+directly. Keep the private key outside this repository.
+
+For a short isolated evaluation, you can create a self-signed certificate in
+secure storage inside the approved environment:
 
 ```sh
 umask 077
@@ -114,12 +182,15 @@ pulumi config set caCertificate < "$secure_dir/server.crt"
 pulumi config set --secret serverPrivateKey < "$secure_dir/server.key"
 ```
 
-Use a renewable organization-issued certificate for a longer-lived install.
-The two-day certificate is an evaluation example, not a product expiry default.
-Retain the trusted public CA file for administrative CLI access. Pulumi
-encrypts the private key/kubeconfig configuration and propagates the key as a
-secret input. Kubernetes and encrypted Pulumi state still contain sensitive
-material; preserve their access controls and never publish state.
+The two-day lifetime is only for evaluation, not a product default. For a
+longer-lived install, use a renewable certificate issued by your organization.
+Keep the trusted public CA file, because you'll need it for CLI access later.
+
+Pulumi encrypts the private key and kubeconfig in its configuration and passes
+the key on as a secret. Kubernetes and the encrypted Pulumi state still hold
+sensitive material, so keep their access controls tight and never publish state.
+
+### 5. Preview and deploy
 
 ```sh
 pulumi preview --refresh
@@ -130,41 +201,58 @@ kubectl -n "$namespace" wait --for=condition=complete job/canary-consumer --time
 kubectl -n "$namespace" logs job/canary-consumer
 ```
 
-Expected sample output is `Canary read authorized and value matched.` The Job
-authenticates as `canary-reader`, reads KV-v2 `kv/data/canary`, verifies the
-synthetic value and revokes its five-minute token. It never prints the value,
-JWT or token. The KV-v2 `data` API path differs from the CLI's
-`bao kv get -mount=kv canary` path.
+Read the preview before you apply it.
 
-For another application, use the same service account in this namespace,
-trusted CA and Kubernetes auth role `canary-reader`. Its ACL permits exactly
-one secret read and self-revocation, without the general default policy.
-Do not put real secrets in `server.hcl`; its seed is public synthetic data.
-Do not change the seed in configuration expecting existing storage to update.
+### 6. Check the result
 
-## Initialization and operator custody
+Success looks like this in the Job log:
 
-On empty Raft storage, the native `initialize` block configures KV-v2,
-the canary, local Kubernetes TokenReview auth, policies and exact roles.
-OpenBao creates no recovery shares during this process. Its temporary root
-token is internal, is never returned and is revoked by the server's deferred
-cleanup. The application stack never handles it. Keep log level at `info`;
-trace logging exposes initialization request/response data.
+```text
+Canary read authorized and value matched.
+```
 
-The `openbao-operator` service account is the operator login door, not a pod.
-Its policy permits changing only this canary and explicitly initializing
-recovery shares. Restrict Kubernetes token creation, impersonation, pod
-creation/exec and Secret reads: Kubernetes administrators can assume this
-identity. There is no stored broad operator/root token.
+Behind that line, the Job logged in as `canary-reader`, read KV-v2 path
+`kv/data/canary`, checked the synthetic value and revoked its five-minute
+token. It never prints the value, JWT or token. Note that the KV-v2 `data` API
+path differs from the CLI form, `bao kv get -mount=kv canary`.
 
-In one approved terminal, establish the private administration path:
+## Use it from your own application
+
+Run your app in this namespace with the `canary-reader` service account, the
+trusted CA and Kubernetes auth role `canary-reader`. Its ACL allows exactly one
+secret read plus revoking its own token, and it doesn't include the general
+default policy.
+
+Don't put real secrets in `server.hcl`. Its seed is public synthetic data.
+Changing the seed in configuration won't update storage that already exists.
+
+## How initialization and operator access work
+
+On empty Raft storage, OpenBao's native `initialize` block sets up KV-v2, the
+canary, local Kubernetes TokenReview auth, policies and exact roles. It creates
+no recovery shares. The temporary root token it uses is internal, is never
+returned and is revoked by the server's deferred cleanup, so the Pulumi stack
+never sees it. Keep the log level at `info`, because trace logging exposes
+initialization request and response data.
+
+The `openbao-operator` service account is how an operator logs in. It isn't a
+pod. Its policy can change only the canary and explicitly initialize recovery
+shares. No broad operator or root token is stored anywhere. Kubernetes
+administrators can assume this identity, so restrict who can create tokens,
+impersonate, create or exec into pods, and read Secrets.
+
+### Update the canary as an operator
+
+In one approved terminal, open a private connection to OpenBao:
 
 ```sh
 kubectl -n "$namespace" port-forward "service/$release" 8200:8200 --address 127.0.0.1
 ```
 
-In another, use the trusted CA and service DNS name for TLS verification.
-Token files stay in private temporary storage, not command arguments or logs:
+In a second terminal, log in with a short-lived service account token and
+update the canary. TLS is verified with the trusted CA and the service DNS
+name. Token files stay in private temporary storage, never in command
+arguments or logs:
 
 ```sh
 set +x
@@ -183,32 +271,35 @@ bao token revoke -self > /dev/null
 unset BAO_TOKEN
 ```
 
-The sample consumer intentionally expects the initial seed. After an
-intentional operator edit, update your application's expected behavior, or
-write `openbao-kms-canary-v1` again before rerunning that demonstration.
+The sample consumer expects the original seed. After an intentional edit,
+either update your application's expected value or write
+`openbao-kms-canary-v1` back before rerunning the demonstration.
 
-Recovery is not set up by this example. If you choose to establish custody,
-authenticate as the operator and use the documented
-`POST /v1/sys/rotate/recovery/init` API with `secret_shares`,
-`secret_threshold`, and one base64-encoded binary PGP public key per share.
-Set `backup=false`; redirect the response to protected storage outside the
-repository and distribute the encrypted shares to their distinct custodians.
-The endpoint immediately returns shares when none exist. It must not be
-invoked in a logged shell or captured as trial evidence. No recovery or
-generate-root drill has been validated here.
+### Recovery shares (not set up)
 
-## Updates and troubleshooting
+This example doesn't set up recovery. If you want recovery custody, log in as
+the operator and call the documented `POST /v1/sys/rotate/recovery/init` API
+with `secret_shares`, `secret_threshold` and one base64-encoded binary PGP
+public key per share. Set `backup=false`. Send the response straight to
+protected storage outside the repository, then hand the encrypted shares to
+separate custodians.
 
-Self-initialization runs only once. Pulumi changes to `server.hcl` update
-startup configuration but do not reconcile API objects on existing Raft data.
-The operator door deliberately cannot rewrite arbitrary policies or roles.
-Broader configuration management requires an explicitly designed operator
-policy/provider integration; this example does not claim it.
+The endpoint returns shares immediately when none exist, so never call it from
+a logged shell or capture its output as evidence. No recovery or generate-root
+drill has been validated here.
 
-The chart uses RollingUpdate so Helm waits for server readiness before creating
-the consumer. After changing TLS/configuration, restart the one server
-deliberately and wait for readiness. There is an outage while it restarts;
-no key or token should be needed for KMS unseal:
+## Updating
+
+Self-initialization runs only once. Pulumi changes to `server.hcl` update the
+startup configuration but don't reconcile API objects in existing Raft data.
+The operator identity deliberately can't rewrite arbitrary policies or roles.
+Broader configuration management would need a purpose-built operator policy or
+provider integration, which this example doesn't include.
+
+The chart uses RollingUpdate, so Helm waits for the server to be ready before it
+creates the consumer. After changing TLS or configuration, restart the single
+server on purpose and wait for it to become ready. Expect an outage during the
+restart. KMS unseals it without any key or token:
 
 ```sh
 kubectl -n "$namespace" delete pod "$release-0"
@@ -217,27 +308,40 @@ kubectl -n "$namespace" wait --for=condition=ready "pod/$release-0" --timeout=30
 kubectl -n "$namespace" exec "$release-0" -- bao status
 ```
 
-If startup fails, inspect sanitized error messages for plugin download, KMS
-permissions, Pod Identity credentials, certificate SAN or PVC mount issues.
-Verify the existing agent and regional KMS connectivity. Do not inject static
-AWS keys, disable TLS verification or substitute an image to make a check pass.
-The plugin needs a writable `/openbao/plugins` directory, provided by emptyDir.
-Missing auth after a partial initialization is not repaired by repeated
-Pulumi updates: preserve storage and diagnose. Only reset disposable data
-after intentionally accepting its loss. Disabling/deleting the KMS key makes
-the Raft contents unusable.
+## Troubleshooting
 
-## Cost and removal
+- **Server won't start**: check sanitized error messages for plugin download,
+  KMS permission, Pod Identity credential, certificate SAN or PVC mount
+  problems. Confirm the Pod Identity agent is running and KMS in the region is
+  reachable.
+- **Plugin errors**: the plugin needs a writable `/openbao/plugins` directory,
+  which an emptyDir provides.
+- **Auth missing after a partial initialization**: repeated `pulumi up` runs
+  won't fix this. Keep the storage and diagnose. Reset disposable data only
+  after you've accepted losing it.
+- **Don't work around failures** by adding static AWS keys, turning off TLS
+  verification or swapping in another image.
 
-One KMS key is approximately $1/month plus requests; the encrypted 2 GiB EBS
-volume is additional. EKS and nodes dominate costs if you create a dedicated
-platform. Verify current AWS pricing for your account and region. No cost cap
-is enforced by this application.
+If the KMS key is disabled or deleted, the Raft data can no longer be read.
 
-Namespace and KMS key are protected by default; the Raft PVC is retained by
-the chart. To remove a disposable installation, first preserve data and custody
-material you need. Stop writers and intentionally authorize data deletion.
-Record its PVC's bound PV and EBS volume ID before removal.
+## Costs
+
+One KMS key costs about $1/month plus requests. The encrypted 2 GiB EBS volume
+is extra. If you create a dedicated EKS cluster for this, the cluster and nodes
+will be most of the bill. Check current AWS pricing for your account and region.
+The application enforces no cost cap.
+
+## Cleanup
+
+The namespace and KMS key are protected by default, and the chart retains the
+Raft PVC. Before removing a disposable installation:
+
+1. Save any data and custody material you still need.
+2. Stop anything that writes secrets, and decide deliberately that the data can
+   be deleted.
+3. Note the PVC's bound PV and EBS volume ID.
+
+Then remove the stack:
 
 ```sh
 # Only after accepting destruction of this stack's data:
@@ -248,15 +352,20 @@ kubectl -n "$namespace" delete pvc "data-$release-0"
 pulumi destroy
 ```
 
-A `Retain` StorageClass leaves the PV/EBS volume for explicit owner cleanup.
-A `Delete` StorageClass delegates EBS removal to CSI. Reconcile actual remaining
-owned volumes either way. KMS deletion is scheduled for 30 days later; record
-PendingDeletion and its effective deletion date. Keep encrypted state until
-cleanup is independently checked. Do not delete the existing EKS cluster,
-shared CSI, Pod Identity agent, VPC, nodes or shared access configuration
-as part of this application's removal.
+What happens next depends on your StorageClass:
 
-## Sources, licensing and maintenance
+- With `Retain`, the PV and EBS volume stay behind for you to delete.
+- With `Delete`, the CSI driver removes the EBS volume.
+
+Either way, confirm which owned volumes actually remain. KMS schedules key
+deletion for 30 days later, so record the PendingDeletion state and its
+deletion date. Keep the encrypted Pulumi state until you've independently
+checked cleanup.
+
+Don't delete the existing EKS cluster, shared CSI driver, Pod Identity agent,
+VPC, nodes or shared access configuration as part of this removal.
+
+## Sources
 
 - [OpenBao 2.7.2](https://github.com/openbao/openbao/releases/tag/v2.7.2)
 - [Official Helm chart 0.30.7](https://github.com/openbao/openbao-helm/releases/tag/openbao-0.30.7)
@@ -264,9 +373,13 @@ as part of this application's removal.
 - [Native self-initialization](https://openbao.org/docs/configuration/self-init/)
 - [Kubernetes authentication](https://openbao.org/docs/auth/kubernetes/)
 - [Recovery share initialization API](https://openbao.org/docs/api/system/rotate/init/)
-- [Truvity secrets](https://github.com/truvity/secrets), whose maintained
-  upstream chart/Pod Identity/KMS patterns overlap this narrower integration.
+- [Truvity secrets](https://github.com/truvity/secrets), a maintained project
+  whose upstream chart, Pod Identity and KMS patterns overlap this narrower
+  integration.
+
+## License
 
 This example's authored code is licensed under the [MIT License](LICENSE) and
 is provided as-is, without warranty or a support commitment. Third-party
-components retain their own licenses and notices.
+components keep their own licenses and notices, including `OPENBAO-LICENSE`,
+`HELM-LICENSE` and `PLUGIN-LICENSE`.
